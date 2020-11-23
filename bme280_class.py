@@ -105,6 +105,8 @@ class BME280:
 
         self.dig_temp_addr = 0x88
         self.dig_temp_len = 6
+        self.dig_press_addr = 0x8E
+        self.dig_press_len = 18
 
         self.ctrl_hum_val = 0x00
         self.status_val = 0x00
@@ -114,28 +116,14 @@ class BME280:
         self.temp_val = 0x00
         self.hum_val = 0x00
 
-        self.dig_T1 = 0x00
-        self.dig_T2 = 0x00
-        self.dig_T3 = 0x00
-
-        self.dig_P1 = 0x00
-        self.dig_P2 = 0x00
-        self.dig_P3 = 0x00
-        self.dig_P4 = 0x00
-        self.dig_P5 = 0x00
-        self.dig_P6 = 0x00
-        self.dig_P7 = 0x00
-        self.dig_P8 = 0x00
-        self.dig_P9 = 0x00
-
-        self.dig_H1 = 0x00
-        self.dig_H2 = 0x00
-        self.dig_H3 = 0x00
-        self.dig_H4 = 0x00
-        self.dig_H5 = 0x00
+        self.t_fine = 0
 
         self.adc_T = 0
+        self.adc_P = 0
+        self.adc_H = 0
         self.T = 0
+        self.P = 0
+        self.H = 0
     
     def setMode(self, mode):
         if mode == BME280Mode.SLEEP:
@@ -254,17 +242,13 @@ class BME280:
         self.bus.write_byte_data(self.sensor_addr, self.ctrl_hum_addr, self.ctrl_hum_val)
         self.bus.write_byte_data(self.sensor_addr, self.ctrl_meas_addr, self.ctrl_meas_val)
 
-    def readout(self):
-        mem = {}
+    def readTemp(self):
         temp_readout = self.bus.read_i2c_block_data(self.sensor_addr, self.temp_addr, self.temp_len)
-        dig_regs = self.bus.read_i2c_block_data(self.sensor_addr, self.dig_temp_addr, self.dig_temp_len)
+        dig_regs_temp = self.bus.read_i2c_block_data(self.sensor_addr, self.dig_temp_addr, self.dig_temp_len)
 
-        #unsigned short
-        self.dig_T1 = np.uint16((dig_regs[1] << 8) | dig_regs[0])
-        #signed short
-        self.dig_T2 = np.int16((dig_regs[3] << 8) | dig_regs[2])
-        #signed short
-        self.dig_T3 = np.int16((dig_regs[5] << 8) | dig_regs[4])
+        dig_T1 = np.uint16((dig_regs_temp[1] << 8) | dig_regs_temp[0])
+        dig_T2 = np.int16((dig_regs_temp[3] << 8) | dig_regs_temp[2])
+        dig_T3 = np.int16((dig_regs_temp[5] << 8) | dig_regs_temp[4])
 
         temp_xlsb = np.uint8(temp_readout[2])
         temp_lsb = np.uint8(temp_readout[1])
@@ -272,30 +256,97 @@ class BME280:
 
         self.adc_T = np.int32(((temp_msb & 255) << 12) | ((temp_lsb & 255) << 4) | ((temp_xlsb & 0b11110000) >> 4))
 
-        self.dig_T1 = np.int32(self.dig_T1)
-        self.dig_T2 = np.int32(self.dig_T2)
-        self.dig_T3 = np.int32(self.dig_T3)
+        dig_T1 = np.int32(dig_T1)
+        dig_T2 = np.int32(dig_T2)
+        dig_T3 = np.int32(dig_T3)
         self.adc_T =  np.int32(self.adc_T)
 
-        var1 = np.int32((((self.adc_T>>3) - (self.dig_T1<<1)) * (self.dig_T2)) >> 11)
-        var2 = np.int32((((self.adc_T>>4) - self.dig_T1) * ((self.adc_T>>4) - self.dig_T1) >> 12) * (self.dig_T3) >> 14)
-        t_fine = np.int32(var1 + var2)
-        self.T = np.int32((t_fine * 5 + 128)>>8)
-        return self.T
+        var1 = np.int32((((self.adc_T>>3) - (dig_T1<<1)) * (dig_T2)) >> 11)
+        var2 = np.int32((((self.adc_T>>4) - dig_T1) * ((self.adc_T>>4) - dig_T1) >> 12) * (dig_T3) >> 14)
+        self.t_fine = np.int32(var1 + var2)
+        self.T = np.int32((self.t_fine * 5 + 128)>>8)
+
+    def readPress(self):
+        press_readout = self.bus.read_i2c_block_data(self.sensor_addr, self.press_addr, self.press_len)
+        dig_regs_press = self.bus.read_i2c_block_data(self.sensor_addr, self.dig_press_addr, self.dig_press_len)
+
+        dig_P1 = np.uint16((dig_regs_press[1] << 8) | dig_regs_press[0])
+        dig_P2 = np.int16((dig_regs_press[3] << 8) | dig_regs_press[2])
+        dig_P3 = np.int16((dig_regs_press[5] << 8) | dig_regs_press[4])
+        dig_P4 = np.int16((dig_regs_press[7] << 8) | dig_regs_press[6])
+        dig_P5 = np.int16((dig_regs_press[9] << 8) | dig_regs_press[8])
+        dig_P6 = np.int16((dig_regs_press[11] << 8) | dig_regs_press[10])
+        dig_P7 = np.int16((dig_regs_press[13] << 8) | dig_regs_press[12])
+        dig_P8 = np.int16((dig_regs_press[15] << 8) | dig_regs_press[14])
+        dig_P9 = np.int16((dig_regs_press[17] << 8) | dig_regs_press[16])
+
+        press_xlsb = np.uint8(press_readout[2])
+        press_lsb = np.uint8(press_readout[1])
+        press_msb = np.uint8(press_readout[0])
+
+        self.adc_P = np.int32(((press_msb & 255) << 12) | ((press_lsb & 255) << 4) | ((press_xlsb & 0b11110000) >> 4))
+        var1 = np.int64(self.t_fine) - 128000
+        var2 = var1 * var1 * np.int64(dig_P6)
+        var2 = var2 + ((var1 * np.int64(dig_P5)) << 17)
+        var2 = var2 + (np.int64(dig_P4) << 35)
+        var1 = ((var1 * var1 * np.int64(dig_P3)) >> 8) + ((var1 * np.int64(dig_P2)) << 12)
+        var1 = ((np.int64(1) << 47) + var1) * (np.int64(dig_P1)) >> 33
+        if var1 == 0:
+            self.P = 0
+            return
+        
+        self.P = np.int64(1048576 - self.adc_P)
+        self.P = (((self.P << 31) - var2) * 3125) / var1
+        var1 = np.int64(dig_P9) * (self.P >> 13) * (self.P >> 13) >> 25
+        var2 = (np.int64(dig_P8) * self.P) >> 19
+        self.P = ((self.P + var1 + var2) >> 8) + (np.int64(dig_P7) << 4)
+        self.P = np.uint32(self.P)
+
+    def readHum(self):
+        hum_readout = self.bus.read_i2c_block_data(self.sensor_addr, self.hum_addr, self.hum_len)
+        dig_regs_hum1 = self.bus.read_i2c_block_data(self.sensor_addr, 0xA1, 1)
+        dig_regs_hum2 = self.bus.read_i2c_block_data(self.sensor_addr, 0xE1, 7)
+
+        dig_H1 = np.uint8(dig_regs_hum1[0])
+        dig_H2 = np.int16((dig_regs_hum2[1] << 8) | dig_regs_hum2[0])
+        dig_H3 = np.uint8(dig_regs_hum2[2])
+        dig_H4 = np.int16((dig_regs_hum2[3] << 4) | (dig_regs_hum2[4] & 0b1111))
+        dig_H5 = np.int16((dig_regs_hum2[5] << 4) | (dig_regs_hum2[4] >> 4))
+        dig_H6 = np.int8(dig_regs_hum2[6])
+
+        hum_lsb = np.uint8(hum_readout[1])
+        hum_msb = np.uint8(hum_readout[0])
+
+        self.adc_H = np.int32((hum_msb << 8) | (hum_lsb))
+        v_x1_u32r = np.int32(self.t_fine - np.int32(76800))
+        v_x1_u32r = (((((self.adc_H << 14) - ((np.int32(dig_H4)) << 20) - ((np.int32(dig_H5)) * v_x1_u32r)) + (np.int32(16384))) >> 15) * (((((((v_x1_u32r * (np.int32(dig_H6))) >> 10) * (((v_x1_u32r * (np.int32(dig_H3))) >> 11) + (np.int32(32768)))) >> 10) + (np.int32(2097152))) * (np.int32(dig_H2)) + 8192) >> 14))
+        v_x1_u32r = (v_x1_u32r - (((((v_x1_u32r >> 15) * (v_x1_u32r >> 15)) >> 7) * (np.int32(dig_H1))) >> 4))
+        v_x1_u32r = 0 if v_x1_u32r < 0 else v_x1_u32r
+        v_x1_u32r = 419430400 if v_x1_u32r > 419430400 else v_x1_u32r
+        self.H = np.uint32(v_x1_u32r >> 12)
+
+    def readout(self):
+        self.readTemp()
+        self.readPress()
+        self.readHum()
+
+        return [self.T, self.P, self.H]
 
     def simple_readTemp(self):
         self.setFilterCoeff(BME280Filter.COEFFOFF)
         self.setOsrsHum(BME280OS.SKIP)
-        self.setOsrsPress(BME280OS.SKIP)
+        self.setOsrsPress(BME280OS.OS1)
         self.setOsrsTemp(BME280OS.OS1)
         self.setMode(BME280Mode.FORCED)
         self.sendCommand()
         self.readout()
-        return self.T
+        return [self.T, self.P, self.H]
 
     
 
 sensor = BME280(0x76)
-temp = sensor.simple_readTemp()
+data = sensor.simple_readTemp()
 
-print("T:" + str(temp))
+print("T:" + str(float(data[0])/100) + " C")
+print("P:" + str(float(data[1])/256/100) + " hPa")
+print("H:" + str(float(data[2])/1024) + " %RH")
